@@ -1,0 +1,230 @@
+import asyncio
+import datetime as dtm
+from collections.abc import AsyncGenerator, Collection, Mapping, Sequence
+from enum import Enum, auto
+from pathlib import Path
+from typing import TYPE_CHECKING, cast
+
+import aiostream
+import vobject
+from aiorem import AbstractResourceManager, AbstractResourceManagerCollection
+
+from .._client import CardDavClient
+from .._utils import get_logger
+from ._base import BaseCrawler, ProfilePictureInfo
+from ._utils import ParsedPhoneNumber, phone_number_to_string
+
+if TYPE_CHECKING:
+    from .._vcardinfo import VCardInfo
+
+_LOGGER = get_logger(Path(__file__), "ProfilePictureInjector")
+
+
+class InjectionMethod(Enum):
+    ALWAYS_OVERRIDE = auto()
+    """Always override existing profile pictures in contacts."""
+    COMPARE_CONTENT = auto()
+    """Only override if the new profile picture is different from the existing one."""
+
+
+class ProfilePictureInjector(AbstractResourceManagerCollection):
+    """Injects profile pictures into contacts based on phone numbers.
+
+    Args:
+        crawlers (Sequence[BaseCrawler]): A collection of crawlers that extract phone numbers
+            and corresponding profile pictures.
+
+            Important:
+                Order matters! Crawlers earlier in the sequence have higher priority.
+                If multiple crawlers provide a profile picture for the same phone number, the one
+                from the crawler that appears first in the sequence will be used.
+        targets (Mapping[str, CardDavClient]): A mapping of target IDs (just some identifiers) to
+            CardDAV clients into which the profile pictures will be injected.
+    """
+
+    def __init__(
+        self, crawlers: Sequence[BaseCrawler], targets: Mapping[str, CardDavClient]
+    ) -> None:
+        self._crawlers = crawlers
+        self._targets = targets
+
+        # Let's limit the number of concurrent requests to avoid overwhelming the servers in case
+        # some of the targets are on the same server.
+        self.__semaphore = asyncio.BoundedSemaphore(50)
+        self.__target_states: dict[str, dict[str, VCardInfo]] | None = None
+        self.__target_vcards: dict[str, dict[str, vobject.base.Component]] | None = None
+
+    @property
+    def _resource_managers(self) -> Collection[AbstractResourceManager]:
+        return [*self._crawlers, *self._targets.values()]
+
+    def _target_state(self, target_id: str) -> dict[str, vobject.base.Component]:
+        """Get the current state of the target address book by its ID."""
+        if self.__target_states is None:
+            raise RuntimeError("Target states not loaded. Call download_target_contacts() first.")
+        if target_id not in self.__target_states:
+            raise ValueError(f"Target ID '{target_id}' not found in targets.")
+        return self.__target_states[target_id]
+
+    def _target_vcards(self, target_id: str) -> dict[str, vobject.base.Component]:
+        """Get the current vCards of the target address book by its ID."""
+        if self.__target_vcards is None:
+            raise RuntimeError("Target vCards not loaded. Call download_target_contacts() first.")
+        if target_id not in self.__target_vcards:
+            raise ValueError(f"Target ID '{target_id}' not found in targets.")
+        return self.__target_vcards[target_id]
+
+    async def _download_vcard_to_memory(self, target_id: str, uid: str) -> str:
+        """Downloads a vCard by its UID from the specified target and returns its content as
+        bytes."""
+        async with self.__semaphore:
+            return (await self._targets[target_id].download_vcard_to_memory(uid)).decode("utf-8")
+
+    async def download_target_contacts(self) -> None:
+        """Download all contacts from the target address books."""
+        async with asyncio.TaskGroup() as tg:
+            target_tasks = {
+                target_id: tg.create_task(target.get_vcard_infos())
+                for target_id, target in self._targets.items()
+            }
+
+        self.__target_states = {
+            target_id: target_task.result() for target_id, target_task in target_tasks.items()
+        }
+
+        async with asyncio.TaskGroup() as tg:
+            tasks = {
+                target_id: {
+                    uid: tg.create_task(self._download_vcard_to_memory(target_id, uid))
+                    for uid in target_state
+                }
+                for target_id, target_state in self.__target_states.items()
+            }
+
+        self.__target_vcards = {
+            target_id: {uid: vobject.readOne(task.result()) for uid, task in uid_tasks.items()}
+            for target_id, uid_tasks in tasks.items()
+        }
+
+    async def _inject_into_vcard(
+        self,
+        target_id: str,
+        uid: str,
+        vcard: vobject.base.Component,
+        profile_picture: ProfilePictureInfo,
+        injection_method: InjectionMethod,
+    ) -> None:
+        """Inject a profile picture into a single vCard and upload it if necessary."""
+        photo = vcard.contents.get("photo")
+        name = vcard.contents.get("fn", [None])[0]
+        log_id = name.value if name else uid
+        should_upload = False
+
+        if photo:
+            existing_photo_data = photo[0].value
+            if injection_method == InjectionMethod.ALWAYS_OVERRIDE or (
+                injection_method == InjectionMethod.COMPARE_CONTENT
+                and existing_photo_data != profile_picture.photo
+            ):
+                should_upload = True
+        else:
+            should_upload = True
+
+        if should_upload:
+            if "photo" in vcard.contents:
+                _LOGGER.debug(
+                    "Overriding existing profile picture for contact '%s' in target '%s'.",
+                    log_id,
+                    target_id,
+                )
+                del vcard.contents["photo"]
+
+            _LOGGER.info(
+                "Injecting profile picture for contact '%s' in target '%s'.", log_id, target_id
+            )
+            photo = vcard.add("PHOTO")
+            photo.value = profile_picture.photo
+            photo.encoding_param = "B"
+            photo.type_param = profile_picture.mime_type.split("/")[-1].upper()
+
+            if "rev" in vcard.contents:
+                del vcard.contents["rev"]
+            rev = vcard.add("REV")
+            rev.value = dtm.datetime.now(tz=dtm.UTC).strftime("%Y%m%dT%H%M%SZ")
+
+            async with self.__semaphore:
+                await self._targets[target_id].upload_vcard(
+                    uid, vcard.serialize(), etag=self._target_state(target_id)[uid].etag
+                )
+        else:
+            _LOGGER.info(
+                "Skipping injection for contact '%s' in target '%s'; no changes needed.",
+                log_id,
+                target_id,
+            )
+
+    async def inject_profile_picture(
+        self,
+        target_id: str,
+        profile_picture: ProfilePictureInfo,
+        injection_method: InjectionMethod,
+    ) -> None:
+        """Inject a single profile picture into the target address books."""
+        async with asyncio.TaskGroup() as tg:
+            for uid, vcard in self._target_vcards(target_id).items():
+                phone_numbers = [
+                    phone_number_to_string(tel.value) for tel in vcard.contents.get("tel", [])
+                ]
+                if profile_picture.phone_number in phone_numbers:
+                    tg.create_task(
+                        self._inject_into_vcard(
+                            target_id, uid, vcard, profile_picture, injection_method
+                        )
+                    )
+
+    async def inject_profile_picture_into_all_targets(
+        self, profile_picture: ProfilePictureInfo, injection_method: InjectionMethod
+    ) -> None:
+        """Inject a single profile picture into the target address books."""
+        async with asyncio.TaskGroup() as tg:
+            for target_id in self._targets:
+                tg.create_task(
+                    self.inject_profile_picture(target_id, profile_picture, injection_method)
+                )
+
+    async def inject_from_all_crawlers(self, injection_method: InjectionMethod) -> None:
+        """Inject profile pictures from all crawlers into the target address books."""
+        _LOGGER.info("Starting crawling and injection of profile pictures.")
+        parsed_phone_numbers: set[ParsedPhoneNumber] = set()
+        async with (
+            asyncio.TaskGroup() as tg,
+            aiostream.streamcontext(
+                aiostream.stream.merge(
+                    *(
+                        cast("AsyncGenerator[ProfilePictureInfo]", crawler.crawl())
+                        for crawler in self._crawlers
+                    )
+                )
+            ) as merged_stream,
+        ):
+            async for profile_picture in merged_stream:
+                if profile_picture.phone_number in parsed_phone_numbers:
+                    _LOGGER.debug(
+                        "Skipping profile picture for phone number '%s' as it was "
+                        "already processed.",
+                        profile_picture.phone_number,
+                    )
+                    continue
+                tg.create_task(
+                    self.inject_profile_picture_into_all_targets(profile_picture, injection_method)
+                )
+                parsed_phone_numbers.add(profile_picture.phone_number)
+
+        # After merging, we can clear the states to allow re-initialization if needed.
+        self.__target_states = None
+        self.__target_vcards = None
+
+    async def do_injection(self, injection_method: InjectionMethod) -> None:
+        """Perform the injection operation."""
+        await self.download_target_contacts()
+        await self.inject_from_all_crawlers(injection_method)
