@@ -2,13 +2,13 @@ import asyncio
 import mimetypes
 from collections.abc import AsyncGenerator
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Self, cast
 
 from pyrogram import Client
 from pyrogram.types import User
 
 from .._utils import get_logger
-from ._base import BaseCrawler, ProfilePictureInfo
+from ._base import BaseCrawler, BaseCrawlerConfig, ProfilePictureInfo
 from ._utils import phone_number_to_string
 
 if TYPE_CHECKING:
@@ -17,13 +17,23 @@ if TYPE_CHECKING:
 _LOGGER = get_logger(Path(__file__), "TelegramCrawler")
 
 
-class TelegramCrawler(BaseCrawler):
+class TelegramCrawlerConfig(BaseCrawlerConfig):
+    api_id: int
+    api_hash: str
+    session_name: str
+
+
+class TelegramCrawler(BaseCrawler[TelegramCrawlerConfig]):
     """Crawler for Telegram contacts and their profile pictures.
     Uses the MTProto API via the `pyrogram`/`kurigram` library.
     """
 
     def __init__(self, api_id: int, api_hash: str, session_name: str):
         self._client = Client(session_name, api_id, api_hash)
+
+    @classmethod
+    def from_config(cls, config: TelegramCrawlerConfig) -> Self:
+        return cls(**config.model_dump())
 
     async def acquire_resources(self) -> None:
         _LOGGER.debug("Acquiring Telegram client resources")

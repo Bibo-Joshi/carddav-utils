@@ -1,7 +1,7 @@
 import asyncio
 import datetime as dtm
 from collections.abc import AsyncGenerator, Collection, Mapping, Sequence
-from enum import Enum, auto
+from enum import StrEnum, auto
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
@@ -20,7 +20,7 @@ if TYPE_CHECKING:
 _LOGGER = get_logger(Path(__file__), "ProfilePictureInjector")
 
 
-class InjectionMethod(Enum):
+class InjectionMethod(StrEnum):
     ALWAYS_OVERRIDE = auto()
     """Always override existing profile pictures in contacts."""
     COMPARE_CONTENT = auto()
@@ -157,7 +157,7 @@ class ProfilePictureInjector(AbstractResourceManagerCollection):
                     uid, vcard.serialize(), etag=self._target_state(target_id)[uid].etag
                 )
         else:
-            _LOGGER.info(
+            _LOGGER.debug(
                 "Skipping injection for contact '%s' in target '%s'; no changes needed.",
                 log_id,
                 target_id,

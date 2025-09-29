@@ -31,16 +31,17 @@ dependencies = [
     "phonenumbers ~= 9.0.14",
     "pydantic ~= 2.11.7",
     "tgcrypto ~= 1.2.5",
-    "vobject~=0.9.9",
+    "typer ~= 0.19.2",
+    "vobject ~= 0.9.9",
 ]
 
 # See also https://github.com/pypa/hatch/issues/1230 for discussion
 # the source distribution will include most of the files in the root directory
 [tool.hatch.build.targets.sdist]
 exclude = [".venv*", ".github"]
-# the wheel will only include the src/chango package
+# the wheel will only include the src/carddav_utils package
 [tool.hatch.build.targets.wheel]
-packages = ["src/ppc"]
+packages = ["src/carddav_utils"]
 
 # RUFF:
 [tool.ruff]

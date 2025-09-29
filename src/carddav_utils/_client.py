@@ -1,13 +1,22 @@
 import asyncio
 import datetime as dtm
 import re
+from typing import Self
 from urllib.parse import urljoin
 from xml.etree import ElementTree
 
 import httpx
 from aiorem import AbstractResourceManager
+from pydantic import BaseModel, ConfigDict
 
 from ._vcardinfo import VCardInfo
+
+
+class CardDavClientConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    username: str
+    password: str
+    address_book_url: str
 
 
 def _parse_http_date(http_date: str) -> dtm.datetime:
@@ -27,6 +36,14 @@ class CardDavClient(AbstractResourceManager):
         # Let's limit the number of concurrent requests to avoid overwhelming the server.
         self.__semaphore = asyncio.BoundedSemaphore(50)
         self.__vcard_cache: dict[str, bytes] = {}
+
+    @classmethod
+    def from_config(cls, config: CardDavClientConfig) -> Self:
+        return cls(
+            username=config.username,
+            password=config.password,
+            address_book_url=config.address_book_url,
+        )
 
     async def acquire_resources(self) -> None:
         await self._httpx_client.__aenter__()

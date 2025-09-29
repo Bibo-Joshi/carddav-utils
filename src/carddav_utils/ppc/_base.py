@@ -1,8 +1,9 @@
 from abc import abstractmethod
 from collections.abc import AsyncGenerator
+from typing import Self
 
 from aiorem import AbstractResourceManager
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from ._utils import ParsedPhoneNumber
 
@@ -16,7 +17,13 @@ class ProfilePictureInfo(BaseModel):
     mime_type: str
 
 
-class BaseCrawler(AbstractResourceManager):
+class BaseCrawlerConfig(BaseModel):
+    """Configuration for a BaseCrawler."""
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class BaseCrawler[CT: BaseCrawlerConfig](AbstractResourceManager):
     """Base class for crawlers that extract phone numbers corresponding profile pictures."""
 
     @abstractmethod
@@ -24,23 +31,7 @@ class BaseCrawler(AbstractResourceManager):
         """Crawl the data source and yield tuples of phone number and a tuple of
         (name, photo bytes, mime type)."""
 
-    # async def export_to_json(self, file_path: Path | str) -> None:
-    #     path = Path(file_path)
-    #     path.parent.mkdir(parents=True, exist_ok=True)
-    #     data = {
-    #         phone_number: {
-    #             "name": name,
-    #             "photo": photo_bytes.decode("latin1"),
-    #             "mime_type": mime_type,
-    #         }
-    #         async for phone_number, (name, photo_bytes, mime_type) in self.crawl()
-    #     }
-    #     path.write_text(json.dumps(data, indent=2))
-    #
-    # async def export_to_directory(self, directory_path: Path | str) -> None:
-    #     directory = Path(directory_path)
-    #     directory.mkdir(parents=True, exist_ok=True)
-    #     async for phone_number, (_, photo_bytes, mime_type) in self.crawl():
-    #         ext = mime_type.split("/")[-1]
-    #         file_path = directory / f"{phone_number}.{ext}"
-    #         file_path.write_bytes(photo_bytes)
+    @classmethod
+    @abstractmethod
+    def from_config(cls, config: CT) -> Self:
+        """Create a crawler instance from the given configuration."""

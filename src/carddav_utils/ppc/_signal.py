@@ -4,16 +4,21 @@ import re
 from collections.abc import AsyncGenerator
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from typing import Self
 
 from .._utils import get_logger
-from ._base import BaseCrawler, ProfilePictureInfo
+from ._base import BaseCrawler, BaseCrawlerConfig, ProfilePictureInfo
 from ._utils import phone_number_to_string
 
 _LOGGER = get_logger(Path(__file__), "SignalCrawler")
 _PATTERN = re.compile(r"(.*)\s*\((\+?[\d ]+)\).*")
 
 
-class SignalCrawler(BaseCrawler):
+class SignalCrawlerConfig(BaseCrawlerConfig):
+    executable_path: str | Path | None = None
+
+
+class SignalCrawler(BaseCrawler[SignalCrawlerConfig]):
     """Crawler for Signal contacts and their profile pictures.
     Works by calling the `sigtop <https://github.com/tbvdm/sigtop>`__ command line tool to export
     avatars.
@@ -23,6 +28,10 @@ class SignalCrawler(BaseCrawler):
         self._executable_path = (
             Path(executable_path) if executable_path else Path(__file__).parent / "sigtop.exe"
         )
+
+    @classmethod
+    def from_config(cls, config: SignalCrawlerConfig) -> Self:
+        return cls(**config.model_dump())
 
     async def acquire_resources(self) -> None:
         if not self._executable_path.is_file():

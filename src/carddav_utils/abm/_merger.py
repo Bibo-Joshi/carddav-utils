@@ -1,6 +1,6 @@
 import asyncio
 from collections.abc import Collection, Mapping
-from enum import Enum, auto
+from enum import StrEnum, auto
 from pathlib import Path
 
 from aiorem import AbstractResourceManager, AbstractResourceManagerCollection
@@ -12,7 +12,7 @@ from .._vcardinfo import VCardInfo
 _LOGGER = get_logger(Path(__file__), "AddressBookMerger")
 
 
-class ComparisonMethod(Enum):
+class ComparisonMethod(StrEnum):
     EDIT_DATE = auto()
     """Compare vCards based on their last modified date. Saves a bit of network traffic by not
     downloading the target vCard. Might be less reliable in some edge cases, e.g. when a
