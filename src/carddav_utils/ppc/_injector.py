@@ -27,6 +27,12 @@ class InjectionMethod(StrEnum):
     """Only override if the new profile picture is different from the existing one."""
 
 
+class _InjectionResult(StrEnum):
+    UNCHANGED = auto()
+    UPDATED = auto()
+    ADDED = auto()
+
+
 class ProfilePictureInjector(AbstractResourceManagerCollection):
     """Injects profile pictures into contacts based on phone numbers.
 
@@ -113,12 +119,13 @@ class ProfilePictureInjector(AbstractResourceManagerCollection):
         vcard: vobject.base.Component,
         profile_picture: ProfilePictureInfo,
         injection_method: InjectionMethod,
-    ) -> None:
+    ) -> _InjectionResult:
         """Inject a profile picture into a single vCard and upload it if necessary."""
         photo = vcard.contents.get("photo")
         name = vcard.contents.get("fn", [None])[0]
         log_id = name.value if name else uid
         should_upload = False
+        result: _InjectionResult = _InjectionResult.UNCHANGED
 
         if photo:
             existing_photo_data = photo[0].value
@@ -127,8 +134,10 @@ class ProfilePictureInjector(AbstractResourceManagerCollection):
                 and existing_photo_data != profile_picture.photo
             ):
                 should_upload = True
+                result = _InjectionResult.UPDATED
         else:
             should_upload = True
+            result = _InjectionResult.ADDED
 
         if should_upload:
             if "photo" in vcard.contents:
@@ -163,39 +172,52 @@ class ProfilePictureInjector(AbstractResourceManagerCollection):
                 target_id,
             )
 
-    async def inject_profile_picture(
+        return result
+
+    async def inject_profile_picture_into_target(
         self,
         target_id: str,
         profile_picture: ProfilePictureInfo,
         injection_method: InjectionMethod,
-    ) -> None:
+    ) -> Sequence[_InjectionResult]:
         """Inject a single profile picture into the target address books."""
+        tasks = []
         async with asyncio.TaskGroup() as tg:
             for uid, vcard in self._target_vcards(target_id).items():
                 phone_numbers = [
                     phone_number_to_string(tel.value) for tel in vcard.contents.get("tel", [])
                 ]
                 if profile_picture.phone_number in phone_numbers:
-                    tg.create_task(
-                        self._inject_into_vcard(
-                            target_id, uid, vcard, profile_picture, injection_method
+                    tasks.append(
+                        tg.create_task(
+                            self._inject_into_vcard(
+                                target_id, uid, vcard, profile_picture, injection_method
+                            )
                         )
                     )
+        return await asyncio.gather(*tasks)
 
     async def inject_profile_picture_into_all_targets(
         self, profile_picture: ProfilePictureInfo, injection_method: InjectionMethod
-    ) -> None:
+    ) -> dict[str, Sequence[_InjectionResult]]:
         """Inject a single profile picture into the target address books."""
         async with asyncio.TaskGroup() as tg:
-            for target_id in self._targets:
-                tg.create_task(
-                    self.inject_profile_picture(target_id, profile_picture, injection_method)
+            tasks = {
+                target_id: tg.create_task(
+                    self.inject_profile_picture_into_target(
+                        target_id, profile_picture, injection_method
+                    )
                 )
+                for target_id in self._targets
+            }
+
+        return {target_id: task.result() for target_id, task in tasks.items()}
 
     async def inject_from_all_crawlers(self, injection_method: InjectionMethod) -> None:
         """Inject profile pictures from all crawlers into the target address books."""
         _LOGGER.info("Starting crawling and injection of profile pictures.")
         parsed_phone_numbers: set[ParsedPhoneNumber] = set()
+        tasks = set()
         async with (
             asyncio.TaskGroup() as tg,
             aiostream.streamcontext(
@@ -215,10 +237,37 @@ class ProfilePictureInjector(AbstractResourceManagerCollection):
                         profile_picture.phone_number,
                     )
                     continue
-                tg.create_task(
-                    self.inject_profile_picture_into_all_targets(profile_picture, injection_method)
+                tasks.add(
+                    tg.create_task(
+                        self.inject_profile_picture_into_all_targets(
+                            profile_picture, injection_method
+                        )
+                    )
                 )
                 parsed_phone_numbers.add(profile_picture.phone_number)
+
+        results: dict[str, list[_InjectionResult]] = {target_id: [] for target_id in self._targets}
+        for task in tasks:
+            injection_results = task.result()
+            for target_id, result in injection_results.items():
+                results[target_id].extend(result)
+
+        for target_id, result in results.items():
+            added = sum(1 for r in result if r == _InjectionResult.ADDED)
+            updated = sum(1 for r in result if r == _InjectionResult.UPDATED)
+            unchanged = sum(1 for r in result if r == _InjectionResult.UNCHANGED)
+            total = len(result)
+            _LOGGER.info(
+                (
+                    "Injection summary for target '%s': %d contacts processed, "
+                    "%d added, %d updated, %d unchanged."
+                ),
+                target_id,
+                total,
+                added,
+                updated,
+                unchanged,
+            )
 
         # After merging, we can clear the states to allow re-initialization if needed.
         self.__target_states = None
