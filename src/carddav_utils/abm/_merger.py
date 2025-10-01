@@ -5,7 +5,7 @@ from pathlib import Path
 
 from aiorem import AbstractResourceManager, AbstractResourceManagerCollection
 
-from .._client import CardDavClient
+from .._carddavclient import CardDavClient
 from .._utils import get_logger
 from .._vcardinfo import VCardInfo
 

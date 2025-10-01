@@ -3,7 +3,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict
 
-from .._client import CardDavClient, CardDavClientConfig
+from .._carddavclient import CardDavClient, CardDavClientConfig
 from ._merger import AddressBookMerger
 
 

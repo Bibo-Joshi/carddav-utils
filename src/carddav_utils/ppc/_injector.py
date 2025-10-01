@@ -9,7 +9,7 @@ import aiostream
 import vobject
 from aiorem import AbstractResourceManager, AbstractResourceManagerCollection
 
-from .._client import CardDavClient
+from .._carddavclient import CardDavClient
 from .._utils import get_logger
 from ._base import BaseCrawler, ProfilePictureInfo
 from ._utils import ParsedPhoneNumber, phone_number_to_string
