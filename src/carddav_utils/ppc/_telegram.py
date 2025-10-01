@@ -7,9 +7,9 @@ from typing import TYPE_CHECKING, Self, cast
 from pyrogram import Client
 from pyrogram.types import User
 
-from .._utils import get_logger
-from ._base import BaseCrawler, BaseCrawlerConfig, ProfilePictureInfo
-from ._utils import phone_number_to_string
+from .._profilepictureinfo import ProfilePictureInfo
+from .._utils import get_logger, phone_number_to_string
+from ._base import BaseCrawler, BaseCrawlerConfig
 
 if TYPE_CHECKING:
     from io import BytesIO
@@ -75,7 +75,6 @@ class TelegramCrawler(BaseCrawler[TelegramCrawlerConfig]):
         )
         return ProfilePictureInfo(
             phone_number=phone_number_to_string(f"+{phone_number}"),
-            name=download_photo.name,
             photo=bytes(download_photo.getbuffer()),
             mime_type=mimetypes.guess_type(download_photo.name)[0] or "application/octet-stream",
         )

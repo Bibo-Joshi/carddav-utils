@@ -5,16 +5,7 @@ from typing import Self
 from aiorem import AbstractResourceManager
 from pydantic import BaseModel, ConfigDict
 
-from ._utils import ParsedPhoneNumber
-
-
-class ProfilePictureInfo(BaseModel):
-    """Information about a profile picture associated with a phone number."""
-
-    phone_number: ParsedPhoneNumber
-    name: str
-    photo: bytes
-    mime_type: str
+from .._profilepictureinfo import ProfilePictureInfo
 
 
 class BaseCrawlerConfig(BaseModel):

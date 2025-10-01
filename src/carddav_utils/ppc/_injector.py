@@ -10,9 +10,9 @@ import vobject
 from aiorem import AbstractResourceManager, AbstractResourceManagerCollection
 
 from .._carddavclient import CardDavClient
-from .._utils import get_logger
-from ._base import BaseCrawler, ProfilePictureInfo
-from ._utils import ParsedPhoneNumber, phone_number_to_string
+from .._profilepictureinfo import ProfilePictureInfo
+from .._utils import ParsedPhoneNumber, get_logger, phone_number_to_string
+from ._base import BaseCrawler
 
 if TYPE_CHECKING:
     from .._vcardinfo import VCardInfo

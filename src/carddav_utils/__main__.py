@@ -6,14 +6,18 @@ from typing import Annotated
 import typer
 
 from carddav_utils.abm import ComparisonMethod, load_address_book_merger
-from carddav_utils.ppc import InjectionMethod, load_profile_picture_injector
+from carddav_utils.ppc import (
+    InjectionMethod,
+    load_profile_picture_injector,
+    load_profile_picture_uploader,
+)
 
 app = typer.Typer()
 
 logging.basicConfig(
     level=logging.WARNING, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
 )
-logging.getLogger("carddav_utils").setLevel(logging.INFO)
+logging.getLogger("carddav_utils").setLevel(logging.DEBUG)
 
 
 @app.command()
@@ -55,6 +59,22 @@ def inject_profile_pictures(
     async def runner() -> None:
         async with load_profile_picture_injector(config_path) as injector:
             await injector.do_injection(injection_method=method)
+
+    asyncio.run(runner())
+
+
+@app.command()
+def upload_profile_pictures(
+    config_path: Annotated[
+        Path,
+        typer.Argument(..., help="Path to the configuration file.", exists=True, readable=True),
+    ],
+) -> None:
+    """Upload profile pictures to Nextcloud according to the given configuration."""
+
+    async def runner() -> None:
+        async with load_profile_picture_uploader(config_path) as uploader:
+            await uploader.do_upload()
 
     asyncio.run(runner())
 

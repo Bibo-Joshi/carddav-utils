@@ -6,6 +6,7 @@ from urllib.parse import urljoin
 from xml.etree import ElementTree
 
 import httpx
+import httpx_retries
 from aiorem import AbstractResourceManager
 from pydantic import BaseModel, ConfigDict
 
@@ -29,7 +30,10 @@ def _parse_http_date(http_date: str) -> dtm.datetime:
 class CardDavClient(AbstractResourceManager):
     def __init__(self, username: str, password: str, address_book_url: str) -> None:
         self._httpx_client = httpx.AsyncClient(
-            auth=(username, password), timeout=30, limits=httpx.Limits(max_connections=1024)
+            auth=(username, password),
+            timeout=30,
+            limits=httpx.Limits(max_connections=1024),
+            transport=httpx_retries.RetryTransport(retry=httpx_retries.Retry(total=5)),
         )
         self._address_book_url: str = address_book_url
 

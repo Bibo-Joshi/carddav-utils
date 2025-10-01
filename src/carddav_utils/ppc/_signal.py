@@ -6,9 +6,9 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Self
 
-from .._utils import get_logger
-from ._base import BaseCrawler, BaseCrawlerConfig, ProfilePictureInfo
-from ._utils import phone_number_to_string
+from .._profilepictureinfo import ProfilePictureInfo
+from .._utils import get_logger, phone_number_to_string
+from ._base import BaseCrawler, BaseCrawlerConfig
 
 _LOGGER = get_logger(Path(__file__), "SignalCrawler")
 _PATTERN = re.compile(r"(.*)\s*\((\+?[\d ]+)\).*")
@@ -71,8 +71,5 @@ class SignalCrawler(BaseCrawler[SignalCrawlerConfig]):
                     "Found profile picture for contact `%s` (%s)", match.group(1), phone_number
                 )
                 yield ProfilePictureInfo(
-                    phone_number=phone_number,
-                    name=file.stem,
-                    photo=file.read_bytes(),
-                    mime_type=mime_type,
+                    phone_number=phone_number, photo=file.read_bytes(), mime_type=mime_type
                 )

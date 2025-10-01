@@ -24,10 +24,13 @@ repos:
           - aiorem ~= 0.0.2
           - aiostream ~= 0.7.0
           - httpx ~= 0.28.1
+          - httpx-retries ~= 0.4.2
           - kurigram ~= 2.2.12
+          - nextcloud-async ~= 0.0.10
           - phonenumbers ~= 9.0.14
           - pydantic ~= 2.11.7
           - tgcrypto ~= 1.2.5
+          - tomlkit ~= 0.13.3
           - typer ~= 0.19.2
           - vobject ~= 0.9.9
   - repo: https://github.com/asottile/pyupgrade
