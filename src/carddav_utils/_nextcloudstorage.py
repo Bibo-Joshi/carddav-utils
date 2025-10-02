@@ -1,109 +1,21 @@
 import asyncio
-import hashlib
-import tomllib
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Self
 
-import tomlkit
 from aiorem import AbstractResourceManager
 from nextcloud_async.exceptions import NextCloudNotFound
-from pydantic import BaseModel
 
 from ._nextcloudclient import NextCloudClient, NextCloudClientConfig
 from ._profilepictureinfo import ProfilePictureInfo
+from ._storageobjects import (
+    AdditionalVCardInfoCollection,
+    StoredProfilePictureInfo,
+    StoredProfilePictureInfoCollection,
+)
 from ._utils import ParsedPhoneNumber, get_logger, phone_number_to_string
 
 _LOGGER = get_logger(Path(__file__), "ProfilePictureExporter")
-
-
-class StoredProfilePictureInfo(BaseModel):
-    phone_number: ParsedPhoneNumber
-    mime_type: str
-    file_path: Path
-    hash: str
-
-    @classmethod
-    def from_profile_picture_info(cls, ppi: ProfilePictureInfo, storage_path: Path) -> Self:
-        return cls(
-            phone_number=ppi.phone_number,
-            mime_type=ppi.mime_type,
-            file_path=(storage_path / ppi.phone_number).with_suffix(
-                f".{ppi.mime_type.split('/')[-1]}"
-            ),
-            hash=hashlib.sha256(ppi.photo).hexdigest(),
-        )
-
-
-class StoredProfilePictureInfoCollection(BaseModel):
-    profile_pictures: list[StoredProfilePictureInfo]
-
-    def update(self, profile_picture_info: ProfilePictureInfo) -> StoredProfilePictureInfo | None:
-        """Update or add a profile picture.
-        Updates are based on phone number. If a profile picture for the given phone number
-        already exists, it will be replaced only if the hash of the new picture differs from
-        the existing one.
-
-        Args:
-            profile_picture_info (ProfilePictureInfo): The profile picture information to add
-                or update.
-
-        Returns:
-            StoredProfilePictureInfo | None: The updated or added StoredProfilePictureInfo,
-                or None if no update was necessary.
-        """
-        new_entry = StoredProfilePictureInfo.from_profile_picture_info(
-            profile_picture_info, Path("./photos")
-        )
-
-        for existing in self.profile_pictures:
-            if existing.phone_number == profile_picture_info.phone_number:
-                if existing.hash == new_entry.hash:
-                    _LOGGER.debug(
-                        "Profile picture for %s is up-to-date. No update needed.",
-                        phone_number_to_string(profile_picture_info.phone_number),
-                    )
-                    return None
-                self.profile_pictures.remove(existing)
-
-        self.profile_pictures.append(new_entry)
-        return new_entry
-
-    def get_by_phone_number(self, phone_number: ParsedPhoneNumber) -> StoredProfilePictureInfo:
-        """Get the StoredProfilePictureInfo for the given phone number.
-
-        Args:
-            phone_number (ParsedPhoneNumber): The phone number to look for.
-
-        Raises:
-            KeyError: If no profile picture is found for the given phone number.
-        """
-        try:
-            return next(pic for pic in self.profile_pictures if pic.phone_number == phone_number)
-        except StopIteration as exc:
-            raise KeyError(
-                f"No profile picture found for phone number {phone_number_to_string(phone_number)}"
-            ) from exc
-
-    def to_toml(self) -> str:
-        data = self.model_dump()
-        for pic in data["profile_pictures"]:
-            pic["file_path"] = pic["file_path"].as_posix()
-        return tomlkit.dumps(data)
-
-    @classmethod
-    def from_toml(cls, toml_str: str) -> Self:
-        data = tomllib.loads(toml_str)
-        pics = [
-            StoredProfilePictureInfo(
-                file_path=Path(item["file_path"]),
-                phone_number=phone_number_to_string(item["phone_number"]),
-                mime_type=item["mime_type"],
-                hash=item["hash"],
-            )
-            for item in data["profile_pictures"]
-        ]
-        return cls(profile_pictures=pics)
 
 
 class NextCloudStorageConfig(NextCloudClientConfig):
@@ -149,7 +61,7 @@ class NextCloudStorage(AbstractResourceManager):
             raise RuntimeError("Current state not loaded. Call initialize() first.")
         return self.__current_state
 
-    async def get_current_status(self) -> StoredProfilePictureInfoCollection:
+    async def get_current_profile_pictures(self) -> StoredProfilePictureInfoCollection:
         """Get the current status of profile pictures in the target NextCloud directory.
 
         Returns:
@@ -170,9 +82,30 @@ class NextCloudStorage(AbstractResourceManager):
         except Exception as e:
             raise ValueError(f"Failed to parse existing profile_pictures.toml: {e}") from e
 
+    async def get_current_additional_vcard_info(self) -> AdditionalVCardInfoCollection:
+        """Get the current status of additional vCard info in the target NextCloud directory.
+
+        Returns:
+            AdditionalVCardInfoCollection: A collection of AdditionalVCardInfo
+                representing the current additional vCard info in the target directory.
+        """
+        toml_path = self._target_path / "additional_vcard_info.toml"
+        try:
+            toml_data = await self._nc_client.download_file_to_memory(toml_path)
+        except NextCloudNotFound:
+            _LOGGER.info(
+                "No existing additional_vcard_info.toml found at %s. Starting fresh.", toml_path
+            )
+            return AdditionalVCardInfoCollection(entries=[])
+
+        try:
+            return AdditionalVCardInfoCollection.from_toml(toml_data.decode("utf-8"))
+        except Exception as e:
+            raise ValueError(f"Failed to parse existing additional_vcard_info.toml: {e}") from e
+
     async def initialize(self) -> None:
         """Initialize the exporter by loading the current state."""
-        self.__current_state = await self.get_current_status()
+        self.__current_state = await self.get_current_profile_pictures()
 
     async def download_picture(
         self, reference: StoredProfilePictureInfo | ParsedPhoneNumber
@@ -182,6 +115,8 @@ class NextCloudStorage(AbstractResourceManager):
             if isinstance(reference, StoredProfilePictureInfo)
             else self._current_state.get_by_phone_number(reference)
         )
+        if sppi is None:
+            raise ValueError(f"No profile picture found for phone number {reference}")
         photo_data = await self._nc_client.download_file_to_memory(
             self._target_path / sppi.file_path
         )
@@ -213,6 +148,10 @@ class NextCloudStorage(AbstractResourceManager):
         # and will be overwritten.
         new_entry = self._current_state.update(profile_picture_info)
         if new_entry is None:
+            _LOGGER.debug(
+                "Profile picture for %s is up-to-date. No update needed.",
+                phone_number_to_string(profile_picture_info.phone_number),
+            )
             return
 
         await self._nc_client.upload_file(
@@ -225,8 +164,16 @@ class NextCloudStorage(AbstractResourceManager):
 
     async def update_from_iterator(self, generator: AsyncIterator[ProfilePictureInfo]) -> None:
         """Update profile pictures from the given generator."""
+        processed_numbers: set[ParsedPhoneNumber] = set()
         async with asyncio.TaskGroup() as tg:
             async for ppi in generator:
+                if ppi.phone_number in processed_numbers:
+                    _LOGGER.debug(
+                        "Skipping duplicate profile picture for %s",
+                        phone_number_to_string(ppi.phone_number),
+                    )
+                    continue
+                processed_numbers.add(ppi.phone_number)
                 tg.create_task(self._update_profile_picture(ppi, upload_index=False))
 
         # Update index only once after all uploads are done

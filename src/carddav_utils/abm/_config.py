@@ -4,6 +4,8 @@ from pathlib import Path
 from pydantic import BaseModel, ConfigDict
 
 from .._carddavclient import CardDavClient, CardDavClientConfig
+from .._nextcloudstorage import NextCloudStorage, NextCloudStorageConfig
+from ._enricher import VCardEnricher
 from ._merger import AddressBookMerger
 
 
@@ -11,6 +13,7 @@ class MergerConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
     targets: dict[str, CardDavClientConfig]
     sources: dict[str, CardDavClientConfig]
+    nextcloud_storage: NextCloudStorageConfig | None = None
 
 
 def load_address_book_merger(path: Path | str) -> AddressBookMerger:
@@ -32,4 +35,9 @@ def load_address_book_merger(path: Path | str) -> AddressBookMerger:
         for source_id, source in config.sources.items()
     }
 
-    return AddressBookMerger(targets=target_config, sources=sources_config)
+    enricher: VCardEnricher | None = None
+    if config.nextcloud_storage is not None:
+        nextcloud_storage = NextCloudStorage.from_config(config.nextcloud_storage)
+        enricher = VCardEnricher(nextcloud_storage)
+
+    return AddressBookMerger(targets=target_config, sources=sources_config, enricher=enricher)

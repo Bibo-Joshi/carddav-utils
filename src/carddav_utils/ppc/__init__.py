@@ -3,6 +3,8 @@
 __all__ = [
     "BaseCrawler",
     "BaseCrawlerConfig",
+    "DirectoryCrawler",
+    "DirectoryCrawlerConfig",
     "InjectionMethod",
     "PPIConfig",
     "PPUConfig",
@@ -25,6 +27,7 @@ from ._config import (
     load_profile_picture_injector,
     load_profile_picture_uploader,
 )
+from ._directory import DirectoryCrawler, DirectoryCrawlerConfig
 from ._injector import InjectionMethod, ProfilePictureInjector
 from ._ncupload import ProfilePictureUploader
 from ._signal import SignalCrawler, SignalCrawlerConfig

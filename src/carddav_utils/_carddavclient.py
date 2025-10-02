@@ -27,13 +27,20 @@ def _parse_http_date(http_date: str) -> dtm.datetime:
         return dtm.datetime.min.replace(tzinfo=dtm.UTC)
 
 
+class CustomRetry(httpx_retries.Retry):
+    def is_retryable_method(self, method: str) -> bool:
+        if method == "PROPFIND":
+            return True
+        return super().is_retryable_method(method)
+
+
 class CardDavClient(AbstractResourceManager):
     def __init__(self, username: str, password: str, address_book_url: str) -> None:
         self._httpx_client = httpx.AsyncClient(
             auth=(username, password),
             timeout=30,
             limits=httpx.Limits(max_connections=1024),
-            transport=httpx_retries.RetryTransport(retry=httpx_retries.Retry(total=5)),
+            transport=httpx_retries.RetryTransport(retry=CustomRetry(total=5)),
         )
         self._address_book_url: str = address_book_url
 

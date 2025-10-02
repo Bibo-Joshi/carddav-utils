@@ -8,6 +8,7 @@ from aiorem import AbstractResourceManager, AbstractResourceManagerCollection
 from .._carddavclient import CardDavClient
 from .._utils import get_logger
 from .._vcardinfo import VCardInfo
+from ._enricher import VCardEnricher
 
 _LOGGER = get_logger(Path(__file__), "AddressBookMerger")
 
@@ -31,21 +32,29 @@ class AddressBookMerger(AbstractResourceManagerCollection):
             CardDAV clients to which the merged address book will be stored.
         sources (Mapping[str, CardDavClient]): A mapping of source IDs (just some indentifiers) to
             CardDAV clients from which the address books will be merged.
-
+        enricher (VCardEnricher | None): An optional VCardEnricher to enrich vCards before merging.
     """
 
     def __init__(
-        self, targets: Mapping[str, CardDavClient], sources: Mapping[str, CardDavClient]
+        self,
+        targets: Mapping[str, CardDavClient],
+        sources: Mapping[str, CardDavClient],
+        enricher: VCardEnricher | None = None,
     ) -> None:
         self._targets = targets
         self._sources = sources
+        self._enricher = enricher
 
         self.__target_states: dict[str, dict[str, VCardInfo]] | None = None
         self.__source_states: dict[str, dict[str, VCardInfo]] | None = None
 
     @property
     def _resource_managers(self) -> Collection[AbstractResourceManager]:
-        return [*self._targets.values(), *self._sources.values()]
+        return [
+            *self._targets.values(),
+            *self._sources.values(),
+            *([self._enricher] if self._enricher else []),
+        ]
 
     def _target_state(self, target_id: str) -> dict[str, VCardInfo]:
         """Get the current state of the target address book by its ID."""
@@ -86,7 +95,16 @@ class AddressBookMerger(AbstractResourceManagerCollection):
         self, source_id: str, uid: str, vcard_info: VCardInfo, comparison_method: ComparisonMethod
     ) -> None:
         """Handle a single vCard from a source address book."""
-        vcard_content: bytes | None = None
+        if self._enricher and comparison_method is not ComparisonMethod.CONTENT:
+            raise ValueError("Enricher can only be used with CONTENT comparison method.")
+
+        async def get_source_vcard_content() -> bytes:
+            content = await self._sources[source_id].download_vcard_to_memory(uid)
+            if self._enricher:
+                content = await self._enricher.enrich_vcard(content)
+            return content
+
+        source_vcard_content: bytes | None = None
 
         for target_id in self._targets:
             if (target_vcard_info := self._target_state(target_id).get(uid)) is not None:
@@ -106,15 +124,19 @@ class AddressBookMerger(AbstractResourceManagerCollection):
                     continue
 
                 async with asyncio.TaskGroup() as tg:
-                    source_task = tg.create_task(
-                        self._sources[source_id].download_vcard_to_memory(uid)
+                    source_task = (
+                        tg.create_task(get_source_vcard_content())
+                        if source_vcard_content is None
+                        else None
                     )
                     target_task = tg.create_task(
                         self._targets[target_id].download_vcard_to_memory(uid)
                     )
 
-                source_vcard_content = await source_task
+                if source_task is not None:
+                    source_vcard_content = await source_task
                 target_vcard_content = await target_task
+
                 if source_vcard_content == target_vcard_content:
                     # If the content is the same, skip this vCard.
                     _LOGGER.debug(
@@ -131,11 +153,10 @@ class AddressBookMerger(AbstractResourceManagerCollection):
             _LOGGER.info(
                 "Uploading vCard %s from source %s to target %s.", uid, source_id, target_id
             )
-            client = self._sources[source_id]
 
-            if vcard_content is None:
-                vcard_content = await client.download_vcard_to_memory(uid)
-            await self._targets[target_id].upload_vcard(uid, vcard_content)
+            if source_vcard_content is None:
+                source_vcard_content = await get_source_vcard_content()
+            await self._targets[target_id].upload_vcard(uid, source_vcard_content)
 
     async def merge_source(self, source_id: str, comparison_method: ComparisonMethod) -> None:
         """Merge a single source address book into the target address book."""

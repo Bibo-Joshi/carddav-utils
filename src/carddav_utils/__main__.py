@@ -12,7 +12,7 @@ from carddav_utils.ppc import (
     load_profile_picture_uploader,
 )
 
-app = typer.Typer()
+app = typer.Typer(pretty_exceptions_enable=False)
 
 logging.basicConfig(
     level=logging.WARNING, format="%(asctime)s %(levelname)s %(name)s: %(message)s"

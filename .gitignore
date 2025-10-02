@@ -166,3 +166,4 @@ tmp/
 *.session
 **sigtop.exe
 config/
+upload/
