@@ -17,7 +17,28 @@ app = typer.Typer(pretty_exceptions_enable=False)
 logging.basicConfig(
     level=logging.WARNING, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
 )
-logging.getLogger("carddav_utils").setLevel(logging.DEBUG)
+
+
+def set_loglevel(
+    loglevel: str | None = typer.Option(
+        "INFO",
+        "--loglevel",
+        "-l",
+        help="Set Log level for carddav_utils (e.g. DEBUG, INFO, WARNING, ERROR, CRITICAL).",
+        case_sensitive=False,
+        show_default=False,
+    ),
+) -> None:
+    if loglevel:
+        level = getattr(logging, loglevel.upper(), None)
+        if isinstance(level, int):
+            logging.getLogger("carddav_utils").setLevel(level)
+        else:
+            typer.echo(f"Invalid Log-Level: {loglevel}", err=True)
+            raise typer.Exit(code=2)
+
+
+app.callback()(set_loglevel)
 
 
 @app.command()
