@@ -5,7 +5,7 @@ from typing import Annotated
 
 import typer
 
-from carddav_utils.abm import ComparisonMethod, load_address_book_merger
+from carddav_utils.abm import load_address_book_merger
 from carddav_utils.ppc import (
     InjectionMethod,
     load_profile_picture_injector,
@@ -47,16 +47,12 @@ def merge_address_books(
         Path,
         typer.Argument(..., help="Path to the configuration file.", exists=True, readable=True),
     ],
-    method: Annotated[
-        ComparisonMethod,
-        typer.Option(..., case_sensitive=False, help="Comparison method to use for merging."),
-    ] = ComparisonMethod.CONTENT,
 ) -> None:
     """Merge address books according to the given configuration and comparison method."""
 
     async def runner() -> None:
         async with load_address_book_merger(config_path) as merger:
-            await merger.do_merge(method)
+            await merger.do_merge()
 
     asyncio.run(runner())
 

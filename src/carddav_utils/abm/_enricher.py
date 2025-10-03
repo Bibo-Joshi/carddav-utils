@@ -86,7 +86,9 @@ class VCardEnricher(AbstractResourceManager):
 
         return added_phone_numbers, added_emails
 
-    async def enrich_vcard(self, vcard_content: bytes) -> bytes:  # noqa: PLR0912
+    async def enrich_vcard(  # noqa: PLR0912
+        self, vcard_object: vobject.base.Component
+    ) -> vobject.base.Component:
         """Enriches a vCard with additional information from NextCloudStorage.
 
         Args:
@@ -94,7 +96,6 @@ class VCardEnricher(AbstractResourceManager):
         Returns:
             bytes: The enriched vCard content.
         """
-        vcard_object = vobject.readOne(vcard_content.decode("utf-8"))
         vcard_contents = vcard_object.contents
 
         phone = None
@@ -155,5 +156,4 @@ class VCardEnricher(AbstractResourceManager):
                 note = vcard_object.add("NOTE")
                 note.value = note_addition
 
-            return vcard_object.serialize().encode("utf-8")
-        return vcard_content
+        return vcard_object

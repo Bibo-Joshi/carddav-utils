@@ -3,7 +3,7 @@ import datetime as dtm
 from collections.abc import AsyncGenerator, Collection, Mapping, Sequence
 from enum import StrEnum, auto
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
+from typing import cast
 
 import aiostream
 import vobject
@@ -13,9 +13,6 @@ from .._carddavclient import CardDavClient
 from .._profilepictureinfo import ProfilePictureInfo
 from .._utils import ParsedPhoneNumber, get_logger, phone_number_to_string
 from ._base import BaseCrawler
-
-if TYPE_CHECKING:
-    from .._vcardinfo import VCardInfo
 
 _LOGGER = get_logger(Path(__file__), "ProfilePictureInjector")
 
@@ -57,20 +54,11 @@ class ProfilePictureInjector(AbstractResourceManagerCollection):
         # Let's limit the number of concurrent requests to avoid overwhelming the servers in case
         # some of the targets are on the same server.
         self.__semaphore = asyncio.BoundedSemaphore(50)
-        self.__target_states: dict[str, dict[str, VCardInfo]] | None = None
         self.__target_vcards: dict[str, dict[str, vobject.base.Component]] | None = None
 
     @property
     def _resource_managers(self) -> Collection[AbstractResourceManager]:
         return [*self._crawlers, *self._targets.values()]
-
-    def _target_state(self, target_id: str) -> dict[str, vobject.base.Component]:
-        """Get the current state of the target address book by its ID."""
-        if self.__target_states is None:
-            raise RuntimeError("Target states not loaded. Call download_target_contacts() first.")
-        if target_id not in self.__target_states:
-            raise ValueError(f"Target ID '{target_id}' not found in targets.")
-        return self.__target_states[target_id]
 
     def _target_vcards(self, target_id: str) -> dict[str, vobject.base.Component]:
         """Get the current vCards of the target address book by its ID."""
@@ -80,36 +68,16 @@ class ProfilePictureInjector(AbstractResourceManagerCollection):
             raise ValueError(f"Target ID '{target_id}' not found in targets.")
         return self.__target_vcards[target_id]
 
-    async def _download_vcard_to_memory(self, target_id: str, uid: str) -> str:
-        """Downloads a vCard by its UID from the specified target and returns its content as
-        bytes."""
-        async with self.__semaphore:
-            return (await self._targets[target_id].download_vcard_to_memory(uid)).decode("utf-8")
-
     async def download_target_contacts(self) -> None:
         """Download all contacts from the target address books."""
         async with asyncio.TaskGroup() as tg:
             target_tasks = {
-                target_id: tg.create_task(target.get_vcard_infos())
+                target_id: tg.create_task(target.download_address_book_to_memory())
                 for target_id, target in self._targets.items()
             }
 
-        self.__target_states = {
-            target_id: target_task.result() for target_id, target_task in target_tasks.items()
-        }
-
-        async with asyncio.TaskGroup() as tg:
-            tasks = {
-                target_id: {
-                    uid: tg.create_task(self._download_vcard_to_memory(target_id, uid))
-                    for uid in target_state
-                }
-                for target_id, target_state in self.__target_states.items()
-            }
-
         self.__target_vcards = {
-            target_id: {uid: vobject.readOne(task.result()) for uid, task in uid_tasks.items()}
-            for target_id, uid_tasks in tasks.items()
+            target_id: task.result() for target_id, task in target_tasks.items()
         }
 
     async def _inject_into_vcard(
@@ -133,6 +101,14 @@ class ProfilePictureInjector(AbstractResourceManagerCollection):
                 injection_method == InjectionMethod.COMPARE_CONTENT
                 and existing_photo_data != profile_picture.photo
             ):
+                root = Path(__file__).parent / "out"
+                (root / f"{log_id}-existing.jpg").write_bytes(existing_photo_data)
+                (root / f"{log_id}-new.jpg").write_bytes(profile_picture.photo)
+                (root / f"{log_id}-diff.txt").write_text(
+                    f"Existing photo size: {len(existing_photo_data)} bytes\n"
+                    f"New photo size: {len(profile_picture.photo)} bytes\n"
+                    f"Same content: {existing_photo_data == profile_picture.photo}\n"
+                )
                 should_upload = True
                 result = _InjectionResult.UPDATED
         else:
@@ -162,9 +138,7 @@ class ProfilePictureInjector(AbstractResourceManagerCollection):
             rev.value = dtm.datetime.now(tz=dtm.UTC).strftime("%Y%m%dT%H%M%SZ")
 
             async with self.__semaphore:
-                await self._targets[target_id].upload_vcard(
-                    uid, vcard.serialize(), etag=self._target_state(target_id)[uid].etag
-                )
+                await self._targets[target_id].upload_vcard(uid, vcard.serialize())
         else:
             _LOGGER.debug(
                 "Skipping injection for contact '%s' in target '%s'; no changes needed.",
@@ -270,7 +244,6 @@ class ProfilePictureInjector(AbstractResourceManagerCollection):
             )
 
         # After merging, we can clear the states to allow re-initialization if needed.
-        self.__target_states = None
         self.__target_vcards = None
 
     async def do_injection(self, injection_method: InjectionMethod) -> None:

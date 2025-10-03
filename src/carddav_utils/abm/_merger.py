@@ -1,27 +1,15 @@
 import asyncio
 from collections.abc import Collection, Mapping
-from enum import StrEnum, auto
 from pathlib import Path
 
+import vobject
 from aiorem import AbstractResourceManager, AbstractResourceManagerCollection
 
 from .._carddavclient import CardDavClient
 from .._utils import get_logger
-from .._vcardinfo import VCardInfo
 from ._enricher import VCardEnricher
 
 _LOGGER = get_logger(Path(__file__), "AddressBookMerger")
-
-
-class ComparisonMethod(StrEnum):
-    EDIT_DATE = auto()
-    """Compare vCards based on their last modified date. Saves a bit of network traffic by not
-    downloading the target vCard. Might be less reliable in some edge cases, e.g. when a
-    contact was changed on the target but the source contact remains unchanged.
-    """
-    CONTENT = auto()
-    """Compare vCards based on their content. Downloads the target vCard to compare it with the
-    source vCard. More reliable but requires more network traffic."""
 
 
 class AddressBookMerger(AbstractResourceManagerCollection):
@@ -45,8 +33,8 @@ class AddressBookMerger(AbstractResourceManagerCollection):
         self._sources = sources
         self._enricher = enricher
 
-        self.__target_states: dict[str, dict[str, VCardInfo]] | None = None
-        self.__source_states: dict[str, dict[str, VCardInfo]] | None = None
+        self.__target_vcards: dict[str, dict[str, vobject.base.Component]] | None = None
+        self.__source_vcards: dict[str, dict[str, vobject.base.Component]] | None = None
 
     @property
     def _resource_managers(self) -> Collection[AbstractResourceManager]:
@@ -56,86 +44,50 @@ class AddressBookMerger(AbstractResourceManagerCollection):
             *([self._enricher] if self._enricher else []),
         ]
 
-    def _target_state(self, target_id: str) -> dict[str, VCardInfo]:
+    def _target_vcards(self, target_id: str) -> dict[str, vobject.base.Component]:
         """Get the current state of the target address book by its ID."""
-        if self.__target_states is None:
+        if self.__target_vcards is None:
             raise RuntimeError("Target states not loaded. Call initialize() first.")
-        if target_id not in self.__target_states:
+        if target_id not in self.__target_vcards:
             raise ValueError(f"Target ID '{target_id}' not found in targets.")
-        return self.__target_states[target_id]
+        return self.__target_vcards[target_id]
 
-    def _source_state(self, source_id: str) -> dict[str, VCardInfo]:
+    def _source_vcards(self, source_id: str) -> dict[str, vobject.base.Component]:
         """Get the current state of a source address book by its ID."""
-        if self.__source_states is None:
+        if self.__source_vcards is None:
             raise RuntimeError("Source states not loaded. Call initialize() first.")
-        if source_id not in self.__source_states:
+        if source_id not in self.__source_vcards:
             raise ValueError(f"Source ID '{source_id}' not found in source states.")
-        return self.__source_states[source_id]
+        return self.__source_vcards[source_id]
 
     async def initialize(self) -> None:
         """Initialize the merger by loading the current states of the target and sources."""
         async with asyncio.TaskGroup() as tg:
             target_tasks = {
-                target_id: tg.create_task(target.get_vcard_infos())
+                target_id: tg.create_task(target.download_address_book_to_memory())
                 for target_id, target in self._targets.items()
             }
             source_tasks = {
-                source_id: tg.create_task(source.get_vcard_infos())
+                source_id: tg.create_task(source.download_address_book_to_memory())
                 for source_id, source in self._sources.items()
             }
 
-        self.__target_states = {
+        self.__target_vcards = {
             target_id: target_task.result() for target_id, target_task in target_tasks.items()
         }
-        self.__source_states = {
+        self.__source_vcards = {
             source_id: source_task.result() for source_id, source_task in source_tasks.items()
         }
 
-    async def _handle_vcard(
-        self, source_id: str, uid: str, vcard_info: VCardInfo, comparison_method: ComparisonMethod
-    ) -> None:
+    async def _handle_vcard(self, source_id: str, uid: str, vcard: vobject.base.Component) -> None:
         """Handle a single vCard from a source address book."""
-        if self._enricher and comparison_method is not ComparisonMethod.CONTENT:
-            raise ValueError("Enricher can only be used with CONTENT comparison method.")
-
-        async def get_source_vcard_content() -> bytes:
-            content = await self._sources[source_id].download_vcard_to_memory(uid)
-            if self._enricher:
-                content = await self._enricher.enrich_vcard(content)
-            return content
-
-        source_vcard_content: bytes | None = None
+        source_vcard_content: str = vcard.serialize()
+        if self._enricher:
+            source_vcard_content = (await self._enricher.enrich_vcard(vcard)).serialize()
 
         for target_id in self._targets:
-            if (target_vcard_info := self._target_state(target_id).get(uid)) is not None:
-                if comparison_method is ComparisonMethod.EDIT_DATE and (
-                    target_vcard_info.last_modified >= vcard_info.last_modified
-                ):
-                    # If the target already has a newer version, skip this vCard.
-                    _LOGGER.debug(
-                        (
-                            "Skipping vCard %s from source %s, edit date on target %s "
-                            "is fresh enough."
-                        ),
-                        uid,
-                        source_id,
-                        target_id,
-                    )
-                    continue
-
-                async with asyncio.TaskGroup() as tg:
-                    source_task = (
-                        tg.create_task(get_source_vcard_content())
-                        if source_vcard_content is None
-                        else None
-                    )
-                    target_task = tg.create_task(
-                        self._targets[target_id].download_vcard_to_memory(uid)
-                    )
-
-                if source_task is not None:
-                    source_vcard_content = await source_task
-                target_vcard_content = await target_task
+            if (target_vcard := self._target_vcards(target_id).get(uid)) is not None:
+                target_vcard_content = target_vcard.serialize()
 
                 if source_vcard_content == target_vcard_content:
                     # If the content is the same, skip this vCard.
@@ -153,32 +105,29 @@ class AddressBookMerger(AbstractResourceManagerCollection):
             _LOGGER.info(
                 "Uploading vCard %s from source %s to target %s.", uid, source_id, target_id
             )
-
-            if source_vcard_content is None:
-                source_vcard_content = await get_source_vcard_content()
             await self._targets[target_id].upload_vcard(uid, source_vcard_content)
 
-    async def merge_source(self, source_id: str, comparison_method: ComparisonMethod) -> None:
+    async def merge_source(self, source_id: str) -> None:
         """Merge a single source address book into the target address book."""
         _LOGGER.info("Merging source address book '%s' into target.", source_id)
-        source_state = self._source_state(source_id)
+        source_state = self._source_vcards(source_id)
 
         async with asyncio.TaskGroup() as tg:
-            for uid, vcard_info in source_state.items():
-                tg.create_task(self._handle_vcard(source_id, uid, vcard_info, comparison_method))
+            for uid, vcard in source_state.items():
+                tg.create_task(self._handle_vcard(source_id, uid, vcard))
 
-    async def merge_all_sources(self, comparison_method: ComparisonMethod) -> None:
+    async def merge_all_sources(self) -> None:
         """Merge all source address books into the target address book."""
         _LOGGER.info("Starting merge of all source address books into target.")
         async with asyncio.TaskGroup() as tg:
             for source_id in self._sources:
-                tg.create_task(self.merge_source(source_id, comparison_method))
+                tg.create_task(self.merge_source(source_id))
 
         # After merging, we can clear the states to allow re-initialization if needed.
-        self.__target_states = None
-        self.__source_states = None
+        self.__target_vcards = None
+        self.__source_vcards = None
 
-    async def do_merge(self, comparison_method: ComparisonMethod) -> None:
+    async def do_merge(self) -> None:
         """Perform the merge operation."""
         await self.initialize()
-        await self.merge_all_sources(comparison_method)
+        await self.merge_all_sources()
