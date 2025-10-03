@@ -101,14 +101,6 @@ class ProfilePictureInjector(AbstractResourceManagerCollection):
                 injection_method == InjectionMethod.COMPARE_CONTENT
                 and existing_photo_data != profile_picture.photo
             ):
-                root = Path(__file__).parent / "out"
-                (root / f"{log_id}-existing.jpg").write_bytes(existing_photo_data)
-                (root / f"{log_id}-new.jpg").write_bytes(profile_picture.photo)
-                (root / f"{log_id}-diff.txt").write_text(
-                    f"Existing photo size: {len(existing_photo_data)} bytes\n"
-                    f"New photo size: {len(profile_picture.photo)} bytes\n"
-                    f"Same content: {existing_photo_data == profile_picture.photo}\n"
-                )
                 should_upload = True
                 result = _InjectionResult.UPDATED
         else:
