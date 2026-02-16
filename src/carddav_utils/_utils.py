@@ -7,6 +7,9 @@ import phonenumbers
 project_root = Path(__file__).parent.parent
 
 
+USER_AGENT = "CardDavUtils/1.0 (+https://github.com/Bibo-Joshi/carddav-utils)"
+
+
 def get_logger(file_path: Path, class_name: str) -> logging.Logger:
     """Get a logger for a specific class in a specific file."""
     relative_path = file_path.relative_to(project_root, walk_up=True)

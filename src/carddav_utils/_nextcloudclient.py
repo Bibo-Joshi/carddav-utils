@@ -8,6 +8,8 @@ from aiorem import AbstractResourceManager
 from nextcloud_async import NextCloudAsync
 from pydantic import BaseModel, ConfigDict
 
+from ._utils import USER_AGENT
+
 
 class NextCloudClientConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -23,6 +25,7 @@ class NextCloudClient(AbstractResourceManager):
             timeout=30,
             limits=httpx.Limits(max_connections=1024),
             transport=httpx_retries.RetryTransport(retry=httpx_retries.Retry(total=5)),
+            headers={"User-Agent": USER_AGENT},
         )
         self._nca = NextCloudAsync(
             client=self._httpx_client, endpoint=base_url, user=username, password=password

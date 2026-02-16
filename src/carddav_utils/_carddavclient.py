@@ -9,6 +9,8 @@ import vobject
 from aiorem import AbstractResourceManager
 from pydantic import BaseModel, ConfigDict
 
+from ._utils import USER_AGENT
+
 
 class CardDavClientConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -38,6 +40,7 @@ class CardDavClient(AbstractResourceManager):
             timeout=30,
             limits=httpx.Limits(max_connections=1024),
             transport=httpx_retries.RetryTransport(retry=CustomRetry(total=5)),
+            headers={"User-Agent": USER_AGENT},
         )
         self._address_book_url: str = address_book_url
 
