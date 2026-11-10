@@ -18,6 +18,7 @@ Python tooling for my personal CardDav needs.
 * Tailored for and tested with [NextCloud](https://nextcloud.com) CardDav address books.
 * Assumes that UIDs of contacts are unique across all address books.
 * Does not consider changes made to contacts in the target address book. Those will be overwritten by the contacts from the source address books on the next sync.
+* Categories in the target address books are preserved and merged with the categories of the source address books.
 * Support for enriching contacts with crawled profile pictures and additional information (phone numbers, email addresses) before merge. Data is downloaded from NextCloud storage.
 
 ## Usage

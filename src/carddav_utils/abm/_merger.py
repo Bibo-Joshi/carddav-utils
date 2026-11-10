@@ -1,4 +1,5 @@
 import asyncio
+import re
 from collections.abc import Collection, Mapping
 from pathlib import Path
 
@@ -10,6 +11,38 @@ from .._utils import get_logger
 from ._enricher import VCardEnricher
 
 _LOGGER = get_logger(Path(__file__), "AddressBookMerger")
+
+_REV_PATTERN = re.compile(r"(^REV;.*$)", flags=re.MULTILINE)
+_CATEGORIES_PATTERN = re.compile(r"(^CATEGORIES:.*$)", flags=re.MULTILINE)
+
+
+def _get_categories(vcard: vobject.base.Component) -> set[str]:
+    categories = vcard.contents.get("categories", [])
+    if not categories:
+        return set()
+
+    value = categories[0].value
+
+    if isinstance(value, str):
+        value = value.split(",")
+
+    return {c.strip() for c in value if c and c.strip()}
+
+
+def _merge_categories(
+    primary: vobject.base.Component, other: vobject.base.Component
+) -> vobject.base.Component:
+    primary_cats = _get_categories(primary)
+    other_cats = _get_categories(other)
+
+    merged = sorted(primary_cats | other_cats, key=lambda x: x.lower())
+
+    if merged:
+        if hasattr(primary, "categories") and primary.contents.get("categories"):
+            primary.categories.value = merged
+        else:
+            categories = primary.add("categories")
+            categories.value = merged
 
 
 class AddressBookMerger(AbstractResourceManagerCollection):
@@ -85,11 +118,22 @@ class AddressBookMerger(AbstractResourceManagerCollection):
         if self._enricher:
             source_vcard_content = (await self._enricher.enrich_vcard(vcard)).serialize()
 
+        source_vcard_content_sanitized = _CATEGORIES_PATTERN.sub(
+            "", _REV_PATTERN.sub("", source_vcard_content)
+        )
+        source_categories = _get_categories(vcard)
+
         for target_id in self._targets:
             if (target_vcard := self._target_vcards(target_id).get(uid)) is not None:
                 target_vcard_content = target_vcard.serialize()
+                target_vcard_content_sanitized = _CATEGORIES_PATTERN.sub(
+                    "", _REV_PATTERN.sub("", target_vcard_content)
+                )
+                target_categories = _get_categories(target_vcard)
 
-                if source_vcard_content == target_vcard_content:
+                if (source_vcard_content_sanitized == target_vcard_content_sanitized) and (
+                    target_categories >= source_categories
+                ):
                     # If the content is the same, skip this vCard.
                     _LOGGER.debug(
                         (
@@ -101,6 +145,10 @@ class AddressBookMerger(AbstractResourceManagerCollection):
                         target_id,
                     )
                     continue
+
+                _merge_categories(vcard, target_vcard)
+                source_vcard_content = vcard.serialize()
+                print(source_vcard_content)
 
             _LOGGER.info(
                 "Uploading vCard %s from source %s to target %s.", uid, source_id, target_id

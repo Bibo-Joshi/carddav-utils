@@ -125,7 +125,8 @@ class VCardEnricher(AbstractResourceManager):
         numbers = []
         if vcard_numbers := vcard_contents.get("tel", []):
             for number in vcard_numbers:
-                numbers.append(phone_number_to_string(number.value))
+                if number.value:
+                    numbers.append(phone_number_to_string(number.value))
 
         if additional_info:
             added_phones, added_mails = self._insert_additional_info(vcard_object, additional_info)
