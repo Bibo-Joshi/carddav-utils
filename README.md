@@ -21,6 +21,13 @@ Python tooling for my personal CardDav needs.
 * Categories in the target address books are preserved and merged with the categories of the source address books.
 * Support for enriching contacts with crawled profile pictures and additional information (phone numbers, email addresses) before merge. Data is downloaded from NextCloud storage.
 
+### Anniversary Calendar Syncing
+
+* Syncs birthdays, anniversaries and death dates from CardDav address books to a NextCloud calendar.
+* Custom reminders are supported via categories on the address book contacts.
+* Birthday events are created only if a reminder is set for the contact to avoid cluttering the calendar with unnecessary events.
+* Events in the target calendar not created by this tool are preserved and not deleted.
+
 ## Usage
 
 * Clone the repository
@@ -58,6 +65,10 @@ graph TD
             MergeTarget1[Merge Target 1]
             MergeTarget2[Merge Target 2]
         end
+        subgraph Calendars[CalDav Calendars]
+            direction TB
+            AnniversaryCalendar[Anniversary Calendar]
+        end
     end
     
     subgraph Crawlers[Profile Picture Crawlers]
@@ -72,6 +83,11 @@ graph TD
         MergingLogic[Merging Logic]
     end
     
+    subgraph ACSyncer[Anniversary Calendar Syncer]
+        direction TB
+        CalendarSyncLogic[Calendar Sync Logic]
+    end
+    
     Crawlers --> |python -m carddav_utils upload-profile-pictures|Uploader --> NextCloudStorage
     Crawlers --> |python -m carddav_utils inject-profile-pictures|Injector
     Injector --> InjectionTarget1
@@ -81,4 +97,7 @@ graph TD
     Source2 --> MergingLogic
     MergingLogic --> |python -m carddav_utils merge-address-books|MergeTarget1
     MergingLogic --> |python -m carddav_utils merge-address-books|MergeTarget2
+    Source1 --> CalendarSyncLogic
+    Source2 --> CalendarSyncLogic
+    CalendarSyncLogic --> |python -m carddav_utils sync-anniversary-calendar|AnniversaryCalendar
 ```

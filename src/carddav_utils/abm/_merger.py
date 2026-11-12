@@ -148,7 +148,6 @@ class AddressBookMerger(AbstractResourceManagerCollection):
 
                 _merge_categories(vcard, target_vcard)
                 source_vcard_content = vcard.serialize()
-                print(source_vcard_content)
 
             _LOGGER.info(
                 "Uploading vCard %s from source %s to target %s.", uid, source_id, target_id

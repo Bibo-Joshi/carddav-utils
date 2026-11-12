@@ -23,6 +23,7 @@ repos:
         additional_dependencies:
           - aiorem ~= 0.0.2
           - aiostream ~= 0.7.0
+          - caldav ~= 3.7.0
           - httpx ~= 0.28.1
           - httpx-retries ~= 0.4.2
           - kurigram ~= 2.2.12

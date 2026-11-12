@@ -1,5 +1,6 @@
 import asyncio
 import datetime as dtm
+from pathlib import Path
 from typing import Self
 from urllib.parse import urljoin
 
@@ -9,7 +10,9 @@ import vobject
 from aiorem import AbstractResourceManager
 from pydantic import BaseModel, ConfigDict
 
-from ._utils import USER_AGENT
+from ._utils import USER_AGENT, get_logger
+
+_LOGGER = get_logger(Path(__file__), "AddressBookMerger")
 
 
 class CardDavClientConfig(BaseModel):
@@ -65,6 +68,7 @@ class CardDavClient(AbstractResourceManager):
         """Downloads the entire address book and returns a dictionary mapping UIDs to vCard
         components."""
         async with self.__semaphore:
+            _LOGGER.debug("Downloading address book from: %s", self._address_book_url)
             response = await self._httpx_client.get(f"{self._address_book_url}?export", timeout=30)
             response.raise_for_status()
             return {

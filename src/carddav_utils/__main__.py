@@ -6,6 +6,7 @@ from typing import Annotated
 import typer
 
 from carddav_utils.abm import load_address_book_merger
+from carddav_utils.acs import load_anniversary_calendar_syncer
 from carddav_utils.ppc import (
     InjectionMethod,
     load_profile_picture_injector,
@@ -92,6 +93,22 @@ def upload_profile_pictures(
     async def runner() -> None:
         async with load_profile_picture_uploader(config_path) as uploader:
             await uploader.do_upload()
+
+    asyncio.run(runner())
+
+
+@app.command()
+def sync_anniversary_calendars(
+    config_path: Annotated[
+        Path,
+        typer.Argument(..., help="Path to the configuration file.", exists=True, readable=True),
+    ],
+) -> None:
+    """Sync anniversary calendars according to the given configuration."""
+
+    async def runner() -> None:
+        async with load_anniversary_calendar_syncer(config_path) as creator:
+            await creator.do_sync()
 
     asyncio.run(runner())
 
