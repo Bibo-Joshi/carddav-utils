@@ -103,9 +103,19 @@ class ContactParser:
                 with contextlib.suppress(ValueError):
                     return dtm.datetime.strptime(field_value, fmt).replace(tzinfo=dtm.UTC).date()
 
-            _LOGGER.warning("Invalid %s format in vCard: %s", field_name, field_value)
+            _LOGGER.warning(
+                "Invalid %s format in vCard of %s: %s",
+                field_name,
+                self._get_full_name(),
+                field_value,
+            )
             return None
-        _LOGGER.warning("Unexpected %s type in vCard: %s", field_name, type(field_value))
+        _LOGGER.warning(
+            "Unexpected %s type in vCard of %s: %s",
+            field_name,
+            self._get_full_name(),
+            type(field_value),
+        )
         return None
 
     def _get_birthday(self) -> dtm.date | None:

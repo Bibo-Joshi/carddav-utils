@@ -25,7 +25,9 @@ _LOGGER = get_logger(Path(__file__), "AnniversaryCalendarSyncer")
 
 def _to_lines(text: str) -> set[str]:
     raw_lines = [
-        line.strip()
+        # For some reason, NextCloud adds a whitespace at the beginning sometimes.
+        # We remove it here to avoid unnecessary updates.
+        line.removeprefix(" ")
         for line in text.splitlines()
         if line.strip() and not _DT_STAMP_PATTERN.match(line)
     ]
@@ -58,12 +60,14 @@ def _events_equal(a: str, b: str) -> bool:
     a_lines, b_lines = _to_lines(a), _to_lines(b)
     return a_lines == b_lines
     # Keeping this as is for debugging purposes, but commented out to avoid cluttering the logs.
+    # equal = a_lines == b_lines
     # if not equal:
     #     print("============")
     #     print("\n".join(sorted(a_lines)))
     #     print("------------")
     #     print("\n".join(sorted(b_lines)))
     #     print("============")
+    # return equal
 
 
 class AnniversaryCalendarSyncer(AbstractResourceManagerCollection):
